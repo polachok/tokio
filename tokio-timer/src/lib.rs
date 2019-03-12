@@ -71,11 +71,51 @@ pub fn sleep(duration: Duration) -> Delay {
 
 // ===== Internal utils =====
 
+/// Timer precision
+pub trait Precision {
+    /// nanos per unit
+    const NANOS_PER_UNIT: u32;
+
+    /// Make duration from units
+    fn duration_from_units(units: u64) -> Duration {
+        Duration::from_nanos(units * Self::NANOS_PER_UNIT as u64)
+    }
+}
+
+/// Millisecond time
+#[derive(Debug)]
+pub struct Millisecond;
+
+impl Precision for Millisecond {
+    const NANOS_PER_UNIT: u32 = 1_000_000;
+}
+
+/// Microsecond time
+#[derive(Debug)]
+pub struct Microsecond;
+
+impl Precision for Microsecond {
+    const NANOS_PER_UNIT: u32 = 1_000;
+}
+
 enum Round {
     Up,
     Down,
 }
 
+fn to_base_unit<P: Precision>(duration: Duration, round: Round) -> u64 {
+    let units_per_sec: u64 = 1_000_000_000 / P::NANOS_PER_UNIT as u64;
+    let base_units = match round {
+        Round::Up => (duration.subsec_nanos() + P::NANOS_PER_UNIT - 1) / P::NANOS_PER_UNIT,
+        Round::Down => duration.subsec_nanos() / P::NANOS_PER_UNIT,
+    };
+    duration
+        .as_secs()
+        .saturating_mul(units_per_sec)
+        .saturating_add(base_units as u64)
+}
+
+/*
 /// Convert a `Duration` to milliseconds, rounding up and saturating at
 /// `u64::MAX`.
 ///
@@ -83,17 +123,6 @@ enum Round {
 /// million years.
 #[inline]
 fn ms(duration: Duration, round: Round) -> u64 {
-    const NANOS_PER_MILLI: u32 = 1_000_000;
-    const MILLIS_PER_SEC: u64 = 1_000;
-
-    // Round up.
-    let millis = match round {
-        Round::Up => (duration.subsec_nanos() + NANOS_PER_MILLI - 1) / NANOS_PER_MILLI,
-        Round::Down => duration.subsec_nanos() / NANOS_PER_MILLI,
-    };
-
-    duration
-        .as_secs()
-        .saturating_mul(MILLIS_PER_SEC)
-        .saturating_add(millis as u64)
+    to_base_unit::<Millisecond>(duration, round)
 }
+*/

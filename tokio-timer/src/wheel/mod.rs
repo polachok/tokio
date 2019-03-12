@@ -21,7 +21,7 @@ use std::usize;
 /// See `Timer` documentation for some implementation notes.
 #[derive(Debug)]
 pub(crate) struct Wheel<T> {
-    /// The number of milliseconds elapsed since the wheel started.
+    /// The number of time units elapsed since the wheel started.
     elapsed: u64,
 
     /// Timer wheel.

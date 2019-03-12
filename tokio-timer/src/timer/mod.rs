@@ -52,6 +52,8 @@ pub(crate) use self::registration::Registration;
 use atomic::AtomicU64;
 use wheel;
 use Error;
+use Millisecond;
+use Precision;
 
 use tokio_executor::park::{Park, ParkThread, Unpark};
 
@@ -61,6 +63,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::usize;
 use std::{cmp, fmt};
+
+/// Timer implementation
+pub trait TimerImpl: Park + Precision {}
 
 /// Timer implementation that drives [`Delay`], [`Interval`], and [`Timeout`].
 ///
@@ -126,7 +131,7 @@ use std::{cmp, fmt};
 /// [`turn`]: #method.turn
 /// [Handle.struct]: struct.Handle.html
 #[derive(Debug)]
-pub struct Timer<T, N = SystemNow> {
+pub struct Timer<T, N = SystemNow, P = Millisecond> {
     /// Shared state
     inner: Arc<Inner>,
 
@@ -138,6 +143,8 @@ pub struct Timer<T, N = SystemNow> {
 
     /// Source of "now" instances
     now: N,
+
+    precision: P,
 }
 
 /// Return value from the `turn` method on `Timer`.
@@ -163,6 +170,8 @@ pub(crate) struct Inner {
 
     /// Unparks the timer thread.
     unpark: Box<Unpark>,
+
+    normalize: fn(Duration, ::Round) -> u64,
 }
 
 /// Maximum number of timeouts the system can handle concurrently.
@@ -214,10 +223,34 @@ where
         let unpark = Box::new(park.unpark());
 
         Timer {
-            inner: Arc::new(Inner::new(now.now(), unpark)),
+            inner: Arc::new(Inner::new(now.now(), unpark, ::to_base_unit::<Millisecond>)),
             wheel: wheel::Wheel::new(),
             park,
             now,
+            precision: Millisecond,
+        }
+    }
+}
+
+impl<T, N, P> Timer<T, N, P>
+where
+    T: Park,
+    N: Now,
+    P: Precision,
+{
+    /// Create a new `Timer` instance that uses `park` to block the current
+    /// thread and `now` to get the current `Instant`.
+    ///
+    /// Specifying the source of time is useful when testing.
+    pub fn new_with_now_precision(park: T, mut now: N, precision: P) -> Self {
+        let unpark = Box::new(park.unpark());
+
+        Timer {
+            inner: Arc::new(Inner::new(now.now(), unpark, ::to_base_unit::<P>)),
+            wheel: wheel::Wheel::new(),
+            park,
+            now,
+            precision,
         }
     }
 
@@ -261,12 +294,12 @@ where
 
     /// Converts an `Expiration` to an `Instant`.
     fn expiration_instant(&self, when: u64) -> Instant {
-        self.inner.start + Duration::from_millis(when)
+        self.inner.start + P::duration_from_units(when)
     }
 
     /// Run timer related logic
     fn process(&mut self) {
-        let now = ::ms(self.now.now() - self.inner.start, ::Round::Down);
+        let now = ::to_base_unit::<P>(self.now.now() - self.inner.start, ::Round::Down);
         let mut poll = wheel::Poll::new(now);
 
         while let Some(entry) = self.wheel.poll(&mut poll, &mut ()) {
@@ -345,10 +378,11 @@ impl Default for Timer<ParkThread, SystemNow> {
     }
 }
 
-impl<T, N> Park for Timer<T, N>
+impl<T, N, P> Park for Timer<T, N, P>
 where
     T: Park,
     N: Now,
+    P: Precision,
 {
     type Unpark = T::Unpark;
     type Error = T::Error;
@@ -406,7 +440,7 @@ where
     }
 }
 
-impl<T, N> Drop for Timer<T, N> {
+impl<T, N, P> Drop for Timer<T, N, P> {
     fn drop(&mut self) {
         use std::u64;
 
@@ -426,13 +460,14 @@ impl<T, N> Drop for Timer<T, N> {
 // ===== impl Inner =====
 
 impl Inner {
-    fn new(start: Instant, unpark: Box<Unpark>) -> Inner {
+    fn new(start: Instant, unpark: Box<Unpark>, normalize: fn(Duration, ::Round) -> u64) -> Inner {
         Inner {
             num: AtomicUsize::new(0),
             elapsed: AtomicU64::new(0),
             process: AtomicStack::new(),
             start,
             unpark,
+            normalize,
         }
     }
 
@@ -479,7 +514,7 @@ impl Inner {
             return 0;
         }
 
-        ::ms(deadline - self.start, ::Round::Up)
+        (self.normalize)(deadline - self.start, ::Round::Up)
     }
 }
 

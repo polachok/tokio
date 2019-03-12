@@ -7,6 +7,8 @@
 use clock::now;
 use timer::Handle;
 use wheel::{self, Wheel};
+use Millisecond;
+use Precision;
 use {Delay, Error};
 
 use futures::{Future, Poll, Stream};
@@ -126,7 +128,7 @@ use std::time::{Duration, Instant};
 /// [`capacity`]: #method.capacity
 /// [`reserve`]: #method.reserve
 #[derive(Debug)]
-pub struct DelayQueue<T> {
+pub struct DelayQueue<T, P = Millisecond> {
     /// Handle to the timer driving the `DelayQueue`
     handle: Handle,
 
@@ -148,6 +150,9 @@ pub struct DelayQueue<T> {
 
     /// Instant at which the timer starts
     start: Instant,
+
+    /// DelayQueue precision
+    precision: P,
 }
 
 /// An entry in `DelayQueue` that has expired and removed.
@@ -237,15 +242,7 @@ impl<T> DelayQueue<T> {
     /// let delay_queue: DelayQueue<u32> = DelayQueue::with_capacity_and_handle(0, &handle);
     /// ```
     pub fn with_capacity_and_handle(capacity: usize, handle: &Handle) -> DelayQueue<T> {
-        DelayQueue {
-            handle: handle.clone(),
-            wheel: Wheel::new(),
-            slab: Slab::with_capacity(capacity),
-            expired: Stack::default(),
-            delay: None,
-            poll: wheel::Poll::new(0),
-            start: now(),
-        }
+        Self::with_capacity_and_handle_and_precision(capacity, handle, Millisecond)
     }
 
     /// Create a new, empty, `DelayQueue` with the specified capacity.
@@ -271,6 +268,47 @@ impl<T> DelayQueue<T> {
     /// ```
     pub fn with_capacity(capacity: usize) -> DelayQueue<T> {
         DelayQueue::with_capacity_and_handle(capacity, &Handle::default())
+    }
+}
+
+impl<T, P> DelayQueue<T, P>
+where
+    P: Precision,
+{
+    /// New with precision
+    pub fn with_precision(precision: P) -> DelayQueue<T, P> {
+        Self::with_capacity_and_handle_and_precision(0, &Handle::default(), precision)
+    }
+
+    /// Create a new, empty, `DelayQueue` backed by the specified timer with
+    /// specified precision.
+    ///
+    /// The queue will not allocate storage until items are inserted into it.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use tokio_timer::DelayQueue;
+    /// use tokio_timer::timer::Handle;
+    ///
+    /// let handle = Handle::default();
+    /// let delay_queue: DelayQueue<u32> = DelayQueue::with_capacity_and_handle(0, &handle);
+    /// ```
+    pub fn with_capacity_and_handle_and_precision(
+        capacity: usize,
+        handle: &Handle,
+        precision: P,
+    ) -> DelayQueue<T, P> {
+        DelayQueue {
+            handle: handle.clone(),
+            wheel: Wheel::new(),
+            slab: Slab::with_capacity(capacity),
+            expired: Stack::default(),
+            delay: None,
+            poll: wheel::Poll::new(0),
+            start: now(),
+            precision,
+        }
     }
 
     /// Insert `value` into the queue set to expire at a specific instant in
@@ -347,7 +385,7 @@ impl<T> DelayQueue<T> {
         };
 
         if should_set_delay {
-            self.delay = Some(self.handle.delay(self.start + Duration::from_millis(when)));
+            self.delay = Some(self.handle.delay(self.start + P::duration_from_units(when)));
         }
 
         Key::new(key)
@@ -463,7 +501,7 @@ impl<T> DelayQueue<T> {
         Expired {
             key: Key::new(key.index),
             data: data.inner,
-            deadline: self.start + Duration::from_millis(data.when),
+            deadline: self.start + P::duration_from_units(data.when),
         }
     }
 
@@ -520,7 +558,7 @@ impl<T> DelayQueue<T> {
     fn next_deadline(&mut self) -> Option<Instant> {
         self.wheel
             .poll_at()
-            .map(|poll_at| self.start + Duration::from_millis(poll_at))
+            .map(|poll_at| self.start + P::duration_from_units(poll_at))
     }
 
     /// Sets the delay of the item associated with `key` to expire after
@@ -679,7 +717,7 @@ impl<T> DelayQueue<T> {
                     try_ready!(delay.poll());
                 }
 
-                let now = ::ms(delay.deadline() - self.start, ::Round::Down);
+                let now = ::to_base_unit::<P>(delay.deadline() - self.start, ::Round::Down);
 
                 self.poll = wheel::Poll::new(now);
             }
@@ -702,14 +740,17 @@ impl<T> DelayQueue<T> {
         let when = if when < self.start {
             0
         } else {
-            ::ms(when - self.start, ::Round::Up)
+            ::to_base_unit::<P>(when - self.start, ::Round::Up)
         };
 
         cmp::max(when, self.wheel.elapsed())
     }
 }
 
-impl<T> Stream for DelayQueue<T> {
+impl<T, P> Stream for DelayQueue<T, P>
+where
+    P: Precision,
+{
     type Item = Expired<T>;
     type Error = Error;
 
@@ -722,7 +763,7 @@ impl<T> Stream for DelayQueue<T> {
             Expired {
                 key: Key::new(idx),
                 data: data.inner,
-                deadline: self.start + Duration::from_millis(data.when),
+                deadline: self.start + P::duration_from_units(data.when),
             }
         });
 
