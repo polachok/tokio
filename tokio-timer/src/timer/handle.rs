@@ -1,5 +1,5 @@
 use timer::Inner;
-use {Deadline, Delay, Error, Interval, Precision};
+use {Deadline, Delay, Error, Interval, Resolution};
 
 use tokio_executor::Enter;
 
@@ -150,11 +150,11 @@ impl Handle {
         Interval::new_with_delay(self.delay(at), duration)
     }
 
-    /// Timer precision for the underlying timer
-    pub fn precision(&self) -> Option<Precision> {
+    /// Timer resolution for the underlying timer
+    pub fn resolution(&self) -> Option<Resolution> {
         HandlePriv::try_current()
             .ok()
-            .and_then(|pri| pri.inner().map(|inn| inn.precision()))
+            .and_then(|pri| pri.inner().map(|inn| inn.resolution()))
     }
 
     fn as_priv(&self) -> Option<&HandlePriv> {

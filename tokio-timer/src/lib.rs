@@ -78,14 +78,14 @@ enum Round {
 
 /// Timer precision
 #[derive(Debug, Copy, Clone)]
-pub struct Precision {
+pub struct Resolution {
     /// nanoseconds per unit of time
     pub nanos_per_unit: u64,
     /// units of time in a second
     pub units_per_sec: u64,
 }
 
-impl Precision {
+impl Resolution {
     /// Convert a `Duration` to base units, rounding up and saturating at
     /// `u64::MAX`.
     fn to_base_units(&self, duration: Duration, round: Round) -> u64 {

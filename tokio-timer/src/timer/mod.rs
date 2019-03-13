@@ -63,15 +63,15 @@ use std::time::{Duration, Instant};
 use std::usize;
 use std::{cmp, fmt};
 
-use Precision;
+use Resolution;
 
 /// Timer implementation
 pub trait TimerImpl<T>: Park
 where
     T: Park,
 {
-    /// Timer precision
-    fn precision(&self) -> Precision;
+    /// Timer resolution
+    fn resolution(&self) -> Resolution;
 }
 
 /// Timer implementation that drives [`Delay`], [`Interval`], and [`Timeout`].
@@ -178,7 +178,7 @@ pub(crate) struct Inner {
     /// Unparks the timer thread.
     unpark: Box<Unpark>,
 
-    precision: Precision,
+    resolution: Resolution,
 }
 
 /// Maximum number of timeouts the system can handle concurrently.
@@ -245,7 +245,7 @@ where
         let unpark = Box::new(timer.unpark());
 
         Timer {
-            inner: Arc::new(Inner::new(now.now(), unpark, timer.precision())),
+            inner: Arc::new(Inner::new(now.now(), unpark, timer.resolution())),
             wheel: wheel::Wheel::new(),
             timer,
             park: PhantomData,
@@ -293,13 +293,13 @@ where
 
     /// Converts an `Expiration` to an `Instant`.
     fn expiration_instant(&self, when: u64) -> Instant {
-        self.inner.start + self.timer.precision().from_base_units(when)
+        self.inner.start + self.timer.resolution().from_base_units(when)
     }
 
     /// Run timer related logic
     fn process(&mut self) {
-        let precision = self.timer.precision();
-        let now = precision.to_base_units(self.now.now() - self.inner.start, ::Round::Down);
+        let resolution = self.timer.resolution();
+        let now = resolution.to_base_units(self.now.now() - self.inner.start, ::Round::Down);
         let mut poll = wheel::Poll::new(now);
 
         while let Some(entry) = self.wheel.poll(&mut poll, &mut ()) {
@@ -408,8 +408,8 @@ impl<T> TimerImpl<T> for DefaultTimerImpl<T>
 where
     T: Park,
 {
-    fn precision(&self) -> Precision {
-        Precision {
+    fn resolution(&self) -> Resolution {
+        Resolution {
             nanos_per_unit: 1_000_000,
             units_per_sec: 1_000,
         }
@@ -499,14 +499,14 @@ impl<T, N, I> Drop for Timer<T, N, I> {
 // ===== impl Inner =====
 
 impl Inner {
-    fn new(start: Instant, unpark: Box<Unpark>, precision: Precision) -> Inner {
+    fn new(start: Instant, unpark: Box<Unpark>, resolution: Resolution) -> Inner {
         Inner {
             num: AtomicUsize::new(0),
             elapsed: AtomicU64::new(0),
             process: AtomicStack::new(),
             start,
             unpark,
-            precision,
+            resolution,
         }
     }
 
@@ -553,12 +553,12 @@ impl Inner {
             return 0;
         }
 
-        self.precision
+        self.resolution
             .to_base_units(deadline - self.start, ::Round::Up)
     }
 
-    fn precision(&self) -> Precision {
-        self.precision
+    fn resolution(&self) -> Resolution {
+        self.resolution
     }
 }
 

@@ -7,7 +7,7 @@
 use clock::now;
 use timer::Handle;
 use wheel::{self, Wheel};
-use {Delay, Error, Precision};
+use {Delay, Error, Resolution};
 
 use futures::{Future, Poll, Stream};
 use slab::Slab;
@@ -149,8 +149,8 @@ pub struct DelayQueue<T> {
     /// Instant at which the timer starts
     start: Instant,
 
-    /// DelayQueue precision
-    precision: Precision,
+    /// DelayQueue resolution
+    resolution: Resolution,
 }
 
 /// An entry in `DelayQueue` that has expired and removed.
@@ -248,7 +248,7 @@ impl<T> DelayQueue<T> {
             delay: None,
             poll: wheel::Poll::new(0),
             start: now(),
-            precision: handle.precision().unwrap_or(Precision {
+            resolution: handle.resolution().unwrap_or(Resolution {
                 nanos_per_unit: 1_000_000,
                 units_per_sec: 1_000,
             }), // FIXME
@@ -356,7 +356,7 @@ impl<T> DelayQueue<T> {
         if should_set_delay {
             self.delay = Some(
                 self.handle
-                    .delay(self.start + self.precision.from_base_units(when)),
+                    .delay(self.start + self.resolution.from_base_units(when)),
             );
         }
 
@@ -473,7 +473,7 @@ impl<T> DelayQueue<T> {
         Expired {
             key: Key::new(key.index),
             data: data.inner,
-            deadline: self.start + self.precision.from_base_units(data.when),
+            deadline: self.start + self.resolution.from_base_units(data.when),
         }
     }
 
@@ -530,7 +530,7 @@ impl<T> DelayQueue<T> {
     fn next_deadline(&mut self) -> Option<Instant> {
         self.wheel
             .poll_at()
-            .map(|poll_at| self.start + self.precision.from_base_units(poll_at))
+            .map(|poll_at| self.start + self.resolution.from_base_units(poll_at))
     }
 
     /// Sets the delay of the item associated with `key` to expire after
@@ -690,7 +690,7 @@ impl<T> DelayQueue<T> {
                 }
 
                 let now = self
-                    .precision
+                    .resolution
                     .to_base_units(delay.deadline() - self.start, ::Round::Down);
 
                 self.poll = wheel::Poll::new(now);
@@ -714,7 +714,8 @@ impl<T> DelayQueue<T> {
         let when = if when < self.start {
             0
         } else {
-            self.precision.to_base_units(when - self.start, ::Round::Up)
+            self.resolution
+                .to_base_units(when - self.start, ::Round::Up)
         };
 
         cmp::max(when, self.wheel.elapsed())
@@ -734,7 +735,7 @@ impl<T> Stream for DelayQueue<T> {
             Expired {
                 key: Key::new(idx),
                 data: data.inner,
-                deadline: self.start + self.precision.from_base_units(data.when),
+                deadline: self.start + self.resolution.from_base_units(data.when),
             }
         });
 
