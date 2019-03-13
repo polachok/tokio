@@ -152,8 +152,9 @@ impl Handle {
 
     /// Timer precision for the underlying timer
     pub fn precision(&self) -> Option<Precision> {
-        self.as_priv()
-            .and_then(|pri| pri.inner().map(|x| x.precision()))
+        HandlePriv::try_current()
+            .ok()
+            .and_then(|pri| pri.inner().map(|inn| inn.precision()))
     }
 
     fn as_priv(&self) -> Option<&HandlePriv> {
