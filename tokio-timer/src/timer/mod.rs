@@ -226,17 +226,8 @@ where
     /// thread and `now` to get the current `Instant`.
     ///
     /// Specifying the source of time is useful when testing.
-    pub fn new_with_now(park: T, mut now: N) -> Self {
-        let unpark = Box::new(park.unpark());
-        let timer = DefaultTimerImpl { park };
-
-        Timer {
-            inner: Arc::new(Inner::new(now.now(), unpark, timer.precision())),
-            wheel: wheel::Wheel::new(),
-            timer,
-            park: PhantomData,
-            now,
-        }
+    pub fn new_with_now(park: T, now: N) -> Self {
+        Self::new_with_now_and_impl(now, DefaultTimerImpl { park })
     }
 }
 
@@ -246,6 +237,22 @@ where
     N: Now,
     I: TimerImpl<T>,
 {
+    /// Create a new `Timer` instance that uses `timer` implementation
+    /// `now` to get the current `Instant`.
+    ///
+    /// Specifying the source of time is useful when testing.
+    pub fn new_with_now_and_impl(mut now: N, timer: I) -> Self {
+        let unpark = Box::new(timer.unpark());
+
+        Timer {
+            inner: Arc::new(Inner::new(now.now(), unpark, timer.precision())),
+            wheel: wheel::Wheel::new(),
+            timer,
+            park: PhantomData,
+            now,
+        }
+    }
+
     /// Returns a handle to the timer.
     ///
     /// The `Handle` is how `Delay` instances are created. The `Delay` instances
