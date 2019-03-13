@@ -76,6 +76,36 @@ enum Round {
     Down,
 }
 
+/// Timer precision
+#[derive(Debug, Copy, Clone)]
+pub struct Precision {
+    /// nanoseconds per unit of time
+    pub nanos_per_unit: u64,
+    /// units of time in a second
+    pub units_per_sec: u64,
+}
+
+impl Precision {
+    fn to_base_units(&self, duration: Duration, round: Round) -> u64 {
+        // Round up.
+        let millis = match round {
+            Round::Up => {
+                (duration.subsec_nanos() as u64 + self.nanos_per_unit - 1) / self.nanos_per_unit
+            }
+            Round::Down => duration.subsec_nanos() as u64 / self.nanos_per_unit,
+        };
+
+        duration
+            .as_secs()
+            .saturating_mul(self.units_per_sec)
+            .saturating_add(millis as u64)
+    }
+
+    fn from_base_units(&self, units: u64) -> Duration {
+        Duration::from_nanos(units.saturating_mul(self.nanos_per_unit))
+    }
+}
+
 /// Convert a `Duration` to milliseconds, rounding up and saturating at
 /// `u64::MAX`.
 ///
